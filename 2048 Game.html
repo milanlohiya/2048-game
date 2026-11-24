@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>2048</title>
+<style>
+  :root {
+    --bg: #f3efe6; --board: #3b4a54; --cell: #4d5e69; --text: #22303a; --muted: #6b7a84;
+    --btn: #e0603a; --btn-text: #fff;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1c242a; --board: #0f1519; --cell: #26323a; --text: #eef2f4; --muted: #93a2ac;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1c242a; --board: #0f1519; --cell: #26323a; --text: #eef2f4; --muted: #93a2ac;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Trebuchet MS", "Segoe UI", Arial, sans-serif;
+    display: flex; flex-direction: column; align-items: center; padding: 20px 12px;
+  }
+  .top { width: min(92vw, 420px); display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  h1 { margin: 0; font-size: 44px; letter-spacing: -1px; }
+  .scores { display: flex; gap: 8px; }
+  .score { background: var(--board); color: #fff; border-radius: 6px; padding: 6px 14px; text-align: center; min-width: 72px; }
+  .score small { display: block; font-size: 11px; color: #b9c6cf; }
+  .score b { font-size: 20px; }
+  .row { width: min(92vw, 420px); display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; color: var(--muted); font-size: 14px; }
+  button { background: var(--btn); color: var(--btn-text); border: 0; border-radius: 6px; padding: 10px 16px; font-size: 15px; font-weight: bold; cursor: pointer; }
+  button:focus-visible { outline: 3px solid var(--text); outline-offset: 2px; }
+  #board {
+    width: min(92vw, 420px); aspect-ratio: 1; background: var(--board);
+    border-radius: 10px; padding: 10px; display: grid;
+    grid-template-columns: repeat(4, 1fr); grid-gap: 10px; position: relative; touch-action: none;
+  }
+  .cell {
+    background: var(--cell); border-radius: 6px; display: flex; align-items: center; justify-content: center;
+    font-weight: bold; font-size: clamp(20px, 7vw, 34px); color: #fff;
+  }
+  .v2 { background: #eee4da; color: #5a4a3a; }
+  .v4 { background: #ede0c8; color: #5a4a3a; }
+  .v8 { background: #f2b179; }
+  .v16 { background: #f59563; }
+  .v32 { background: #f67c5f; }
+  .v64 { background: #f65e3b; }
+  .v128 { background: #edcf72; font-size: clamp(18px, 6vw, 30px); }
+  .v256 { background: #edcc61; font-size: clamp(18px, 6vw, 30px); }
+  .v512 { background: #edc850; font-size: clamp(18px, 6vw, 30px); }
+  .v1024 { background: #edc53f; font-size: clamp(15px, 5vw, 24px); }
+  .v2048 { background: #edc22e; font-size: clamp(15px, 5vw, 24px); }
+  .vbig { background: #3c3a32; font-size: clamp(14px, 4.5vw, 22px); }
+  #msg {
+    position: absolute; inset: 0; background: rgba(243,239,230,.88); color: #22303a; border-radius: 10px;
+    display: none; flex-direction: column; align-items: center; justify-content: center; gap: 14px; font-size: 30px; font-weight: bold;
+  }
+  .help { margin-top: 14px; width: min(92vw, 420px); color: var(--muted); font-size: 14px; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <h1>2048</h1>
+    <div class="scores">
+      <div class="score"><small>Score</small><b id="score">0</b></div>
+      <div class="score"><small>Best</small><b id="best">0</b></div>
+    </div>
+  </div>
+  <div class="row">
+    <span>Join the tiles to reach 2048.</span>
+    <button id="restart">New game</button>
+  </div>
+  <div id="board" aria-label="2048 board"></div>
+  <p class="help">Use the arrow keys (or WASD), or swipe on your phone. Tiles with the same number merge into one.</p>
+
+<script>
+  var SIZE = 4;
+  var grid, score, best = 0, over = false;
+  var boardEl = document.getElementById('board');
+  var scoreEl = document.getElementById('score');
+  var bestEl = document.getElementById('best');
+
+  try { best = parseInt(localStorage.getItem('best2048')) || 0; } catch (e) {}
+
+  function newGame() {
+    grid = [];
+    for (var r = 0; r < SIZE; r++) grid.push([0, 0, 0, 0]);
+    score = 0; over = false;
+    addTile(); addTile();
+    draw();
+  }
+
+  function addTile() {
+    var empty = [];
+    for (var r = 0; r < SIZE; r++)
+      for (var c = 0; c < SIZE; c++)
+        if (grid[r][c] === 0) empty.push([r, c]);
+    if (!empty.length) return;
+    var spot = empty[Math.floor(Math.random() * empty.length)];
+    grid[spot[0]][spot[1]] = Math.random() < 0.9 ? 2 : 4;
+  }
+
+  // slide one row to the left and merge equal tiles
+  function slideRow(row) {
+    var nums = row.filter(function (n) { return n !== 0; });
+    for (var i = 0; i < nums.length - 1; i++) {
+      if (nums[i] === nums[i + 1]) {
+        nums[i] *= 2;
+        score += nums[i];
+        nums.splice(i + 1, 1);
+      }
+    }
+    while (nums.length < SIZE) nums.push(0);
+    return nums;
+  }
+
+  function rotate(g) { // rotate the grid 90 degrees clockwise
+    var n = [];
+    for (var r = 0; r < SIZE; r++) {
+      n.push([]);
+      for (var c = 0; c < SIZE; c++) n[r].push(g[SIZE - 1 - c][r]);
+    }
+    return n;
+  }
+
+  // dir: 0 = left, 1 = up, 2 = right, 3 = down
+  function move(dir) {
+    if (over) return;
+    var before = JSON.stringify(grid);
+    var turns = [0, 3, 2, 1][dir];
+    for (var i = 0; i < turns; i++) grid = rotate(grid);
+    grid = grid.map(slideRow);
+    for (var j = 0; j < (4 - turns) % 4; j++) grid = rotate(grid);
+    if (JSON.stringify(grid) !== before) {
+      addTile();
+      if (score > best) {
+        best = score;
+        try { localStorage.setItem('best2048', best); } catch (e) {}
+      }
+      draw();
+      checkEnd();
+    }
+  }
+
+  function canMove() {
+    for (var r = 0; r < SIZE; r++)
+      for (var c = 0; c < SIZE; c++) {
+        if (grid[r][c] === 0) return true;
+        if (c < SIZE - 1 && grid[r][c] === grid[r][c + 1]) return true;
+        if (r < SIZE - 1 && grid[r][c] === grid[r + 1][c]) return true;
+      }
+    return false;
+  }
+
+  function checkEnd() {
+    var won = grid.some(function (row) { return row.indexOf(2048) !== -1; });
+    if (won) showMsg('You win!');
+    else if (!canMove()) { over = true; showMsg('Game over'); }
+  }
+
+  function showMsg(text) {
+    var m = document.getElementById('msg');
+    m.firstChild.textContent = text;
+    m.style.display = 'flex';
+  }
+
+  function draw() {
+    boardEl.innerHTML = '';
+    for (var r = 0; r < SIZE; r++)
+      for (var c = 0; c < SIZE; c++) {
+        var v = grid[r][c];
+        var d = document.createElement('div');
+        d.className = 'cell' + (v ? (v > 2048 ? ' vbig' : ' v' + v) : '');
+        d.textContent = v || '';
+        boardEl.appendChild(d);
+      }
+    var m = document.createElement('div');
+    m.id = 'msg';
+    m.innerHTML = '<span></span><button id="again">Try again</button>';
+    boardEl.appendChild(m);
+    document.getElementById('again').onclick = newGame;
+    scoreEl.textContent = score;
+    bestEl.textContent = best;
+  }
+
+  document.addEventListener('keydown', function (e) {
+    var map = { ArrowLeft: 0, ArrowUp: 1, ArrowRight: 2, ArrowDown: 3, a: 0, w: 1, d: 2, s: 3 };
+    if (e.key in map) { e.preventDefault(); move(map[e.key]); }
+  });
+
+  // swipe support for phones
+  var sx, sy;
+  boardEl.addEventListener('touchstart', function (e) {
+    sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+  }, { passive: true });
+  boardEl.addEventListener('touchend', function (e) {
+    var dx = e.changedTouches[0].clientX - sx;
+    var dy = e.changedTouches[0].clientY - sy;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 25) return;
+    if (Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? 2 : 0);
+    else move(dy > 0 ? 3 : 1);
+  });
+
+  document.getElementById('restart').onclick = newGame;
+  newGame();
+</script>
+</body>
+</html>
